@@ -1,12 +1,12 @@
 import { Sandbox } from "@vercel/sandbox";
-import { authorized } from "../../../lib/auth";
+import { verifySignedRequest } from "../../../lib/auth";
 import { CHROMIUM_SYSTEM_DEPS, UC_BIN, UC_SHA256, UC_URL, UC_VERSION } from "../../../lib/uc";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  if (!authorized(request)) {
+  if (!verifySignedRequest(request)) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
