@@ -1,37 +1,26 @@
 import { Sandbox } from "@vercel/sandbox";
-import { authorized } from "../../../lib/auth";
+import { verifySignedRequest } from "../../../lib/auth";
 import { safeHttpsUrl } from "../../../lib/safe-url";
 import { UC_BIN } from "../../../lib/uc";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-type Body = {
-  snapshotId?: string;
-  url?: string;
-  mode?: "inspect";
-};
-
 export async function POST(request: Request) {
-  if (!authorized(request)) {
+  const targetRaw = request.headers.get("x-mind-target") || "";
+  const snapshotId = request.headers.get("x-mind-snapshot") || "";
+
+  if (!verifySignedRequest(request, targetRaw, snapshotId)) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  let body: Body;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ ok: false, error: "invalid JSON" }, { status: 400 });
-  }
-
-  const snapshotId = String(body.snapshotId || "");
   if (!snapshotId.startsWith("snap_")) {
     return Response.json({ ok: false, error: "valid snapshotId required" }, { status: 400 });
   }
 
   let target: URL;
   try {
-    target = safeHttpsUrl(String(body.url || ""));
+    target = safeHttpsUrl(targetRaw);
   } catch (error) {
     return Response.json(
       { ok: false, error: error instanceof Error ? error.message : String(error) },
