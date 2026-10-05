@@ -39,7 +39,6 @@ export async function POST(request: Request) {
 
     const args = [
       "--headless=new",
-      "--no-sandbox",
       "--disable-gpu",
       "--disable-dev-shm-usage",
       "--disable-background-networking",
