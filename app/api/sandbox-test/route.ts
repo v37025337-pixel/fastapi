@@ -1,0 +1,88 @@
+import { Sandbox } from "@vercel/sandbox";
+import { verifySignedRequest } from "../../../lib/auth";
+import { safeHttpsUrl } from "../../../lib/safe-url";
+import { UC_BIN } from "../../../lib/uc";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+export async function POST(request: Request) {
+  const targetRaw = request.headers.get("x-mind-target") || "";
+  const snapshotId = request.headers.get("x-mind-snapshot") || "";
+
+  if (!verifySignedRequest(request, targetRaw, snapshotId)) {
+    return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  if (!snapshotId.startsWith("snap_")) {
+    return Response.json({ ok: false, error: "valid snapshotId required" }, { status: 400 });
+  }
+
+  let target: URL;
+  try {
+    target = safeHttpsUrl(targetRaw);
+  } catch (error) {
+    return Response.json(
+      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 400 }
+    );
+  }
+
+  const sandbox = await Sandbox.create({
+    source: { type: "snapshot", snapshotId },
+    timeout: 120_000
+  });
+
+  try {
+    const idCmd = await sandbox.runCommand("id", []);
+    const userInfo = (await idCmd.stdout()).trim();
+
+    const usernsCmd = await sandbox.runCommand("sh", [
+      "-lc",
+      "cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo unavailable"
+    ]);
+    const userns = (await usernsCmd.stdout()).trim();
+
+    const args = [
+      "--headless=new",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--metrics-recording-only",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--no-pings",
+      "--disable-search-engine-collection",
+      "--force-punycode-hostnames",
+      "--enable-features=MinimalReferrers,RemoveClientHints,ReducedSystemInfo,ClearDataOnExit",
+      "--user-data-dir=/tmp/mindcore-sandbox-test-profile",
+      "--virtual-time-budget=10000",
+      "--dump-dom",
+      target.toString()
+    ];
+
+    const run = await sandbox.runCommand(UC_BIN, args);
+    const html = await run.stdout();
+    const stderr = await run.stderr();
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].replace(/\s+/g, " ").trim() : null;
+
+    return Response.json({
+      ok: run.exitCode === 0,
+      sandboxed: run.exitCode === 0,
+      url: target.toString(),
+      exitCode: run.exitCode,
+      title,
+      domBytes: html.length,
+      stderrTail: stderr.slice(-8000),
+      userInfo,
+      unprivilegedUserNamespaces: userns,
+      usedNoSandboxFlag: false
+    });
+  } finally {
+    await sandbox.stop();
+  }
+}
